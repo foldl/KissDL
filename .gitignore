@@ -1,17 +1,8 @@
-.eunit
-*.o
+tflite/
+ebin/
+.vscode/
+*.pyc
+*.dat
+*.exe
 *.beam
-*.plt
-erl_crash.dump
-.concrete/DEV_MODE
-
-# rebar 2.x
-.rebar
-rel/example_project
-ebin/*.beam
-deps
-
-# rebar 3
-.rebar3
-_build/
-_checkouts/
+*.emodel

@@ -1,5 +1,5 @@
 // weights is of shape [OUTPUT_SIZE, INPUTSIZE]
-{{if type == float32}}void {{kernel_fun}}(const float *input, const float *weights, const float *bias, float *output)
+{{if type == float32}}static void {{kernel_fun}}(const float *input, const float *weights, const float *bias, float *output)
 {
     int b;
     for (b = 0; b < {{BATCH_SIZE}}; b++)

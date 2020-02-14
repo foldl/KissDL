@@ -22,7 +22,8 @@ run(Str, Dict, Call) when is_list(Str), is_map(Dict) ->
 get_tmpl_value(K, Dict) ->
     V = case maps:get(K, Dict, undefined) of
         undefined when is_list(K) -> maps:get(list_to_atom(K), Dict);
-        X when X =/= undefined -> X
+        X when X =/= undefined -> X;
+        _ -> throw({undefined, K})
     end,
     to_list(V).
 

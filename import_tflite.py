@@ -63,26 +63,14 @@ def getShape(t: tflite.Tensor.Tensor):
 def format_quantization(q: tflite.QuantizationParameters.QuantizationParameters):
     items = []
     if q.Details() == None:
-        r = []
-        for i in range(0, q.MinLength()):
-            r.append(q.Min(i))
-        if len(r) > 0:
-            items.append('{min, %s}' % (r))
-        r = []
-        for i in range(0, q.MaxLength()):
-            r.append(q.Max(i))
-        if len(r) > 0:
-            items.append('{max, %s}' % (r))
-        r = []
-        for i in range(0, q.ScaleLength()):
-            r.append(q.Scale(i))
-        if len(r) > 0:
-            items.append('{scale, %s}' % (r))
-        r = []
-        for i in range(0, q.ZeroPointLength()):
-            r.append(q.ZeroPoint(i))
-        if len(r) > 0:
-            items.append('{zero_pt, %s}' % (r))
+        if q.MinLength() > 0:
+            items.append('{min, %s}' % (q.MinAsNumpy().tolist()))
+        if q.MaxLength() > 0:
+            items.append('{max, %s}' % (q.MaxAsNumpy().tolist()))
+        if q.ScaleLength() > 0:
+            items.append('{scale, %s}' % (q.ScaleAsNumpy().tolist()))
+        if q.ZeroPointLength() > 0:
+            items.append('{zero_pt, %s}' % (q.ZeroPointAsNumpy().tolist()))
     else:
         raise Exception('unsupported QuantizationDetails')
 
@@ -120,6 +108,12 @@ def convert_tensor(m, tensor: tflite.Tensor.Tensor, fpath, id):
 
     return s + '[' + ', '.join(props) + ']}.'
 
+def parse_conv2d_opt(opt: tflite.Conv2DOptions.Conv2DOptions, props: list):
+    props.append('{padding, %s}' % "same" if opt.Padding() == tflite.Padding.Padding.SAME else "zero")
+    props.append('{stride, {%s, %s}}' % (opt.StrideW(), opt.StrideH()))
+    props.append('{activation, %s}' % activate_fn_dict[opt.FusedActivationFunction()])
+    props.append('{dilation_factor, {%s, %s}}' % (opt.DilationWFactor(), opt.DilationHFactor()))
+
 def parse_depth2d_opt(opt, props):
     props.append('{padding, %s}' % "same" if opt.Padding() == tflite.Padding.Padding.SAME else "zero")
     props.append('{stride, {%s, %s}}' % (opt.StrideW(), opt.StrideH()))
@@ -146,6 +140,10 @@ def convert_op(model: tflite.Model.Model, g: tflite.SubGraph.SubGraph, o: tflite
     s = "{op, '%s', [%s], [%s], [" % (op_code_dict[code], get_tensors_name(g, inputs), get_tensors_name(g, outputs))
     props = []
     ot = o.BuiltinOptions()
+    if o.BuiltinOptionsType() == tflite.BuiltinOptions.BuiltinOptions.Conv2DOptions:
+        opt = tflite.Conv2DOptions.Conv2DOptions()
+        opt.Init(ot.Bytes, ot.Pos)
+        parse_conv2d_opt(opt, props)
     if o.BuiltinOptionsType() == tflite.BuiltinOptions.BuiltinOptions.DepthwiseConv2DOptions:
         opt = tflite.DepthwiseConv2DOptions.DepthwiseConv2DOptions()
         opt.Init(ot.Bytes, ot.Pos)
@@ -203,7 +201,7 @@ def convert(fn, kmfn, n = 0):
 
 InitBuiltinCodeDict()
 
-convert('./examples/tiny_conv_graph.tflite', './examples/tiny_conv_graph.emodel')
+#convert('./examples/tiny_conv_graph.tflite', './examples/tiny_conv_graph.emodel')
 
 if len(sys.argv) != 3:
     print("usage: python import_tflite.py tflite_file_name result_file_name")

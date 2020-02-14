@@ -154,21 +154,23 @@ read_template(X) when is_atom(X) ->
     Content.
 
 gen_kernel(Op, Vars) ->
-    Opts = prepare(Op, Vars),
+    Opts0 = prepare(Op, Vars),
+    Opts = maps:put(c_type, c_type(maps:get(type, Opts0)), Opts0),
     Ker = element(2, Op),
     FAcc = case get(ker_names) of undefined -> sets:new(); Acc -> Acc end,
     {ScheduleName, Acc10} = gen_key(atom_to_list(Ker), FAcc),
     put(ker_names, Acc10),
     case get({Ker, Opts}) of
         undefined ->
-            Call = case maps:get(activation, Opts, undefined) of
-                undefined -> undefined;
-                Act ->
-                    fun (["act", Value]) ->
+            Act = maps:get(activation, Opts, undefined),
+            Call = fun
+                (["act", Value]) ->
+                    if  Act /= undefined ->
                             Opts20 = #{activation => Act, value => Value, type => maps:get(type, Opts)},
                             kdl_template:run(get(act_templ), Opts20);
-                        (_) -> "???"
-                    end
+                        true -> Value
+                    end;
+                (_) -> "???"
             end,
             put({Ker, Opts}, ScheduleName),
             Content = read_template(Ker),
@@ -183,16 +185,32 @@ padding_with_offset(Stride, DilationRate, InSize, FilterSize, OutSize) ->
     TotalPadding = max(0, (OutSize - 1) * Stride + EffectFilterSize - InSize),
     {TotalPadding div 2, TotalPadding rem 2}.
 
+prepare({op, average_pool_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->
+    [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
+    [OD, FH, FW, ID] = proplists:get_value(shape, dict:fetch(Filter, Vars)),
+    [B, OH, OW, OD] = proplists:get_value(shape, dict:fetch(Output, Vars)),
+    {StrideW, StrideH} = proplists:get_value(stride, Opts, {1, 1}),
+    {PH, _PHO} = padding_with_offset(StrideH, 1, IH, FH, OH),
+    {PW, _PWO} = padding_with_offset(StrideW, 1, IW, FW, OW),
+    #{'BATCH_SIZE' => B, 'INPUT_HEIGHT' => IH, 'INPUT_WIDTH' => IW, 'INPUT_DEPTH' => ID,
+        'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH, 'FILTER_DEPTH' => ID,
+        'OUTPUT_HEIGHT' => OH, 'OUTPUT_WIDTH' => OW, 'OUTPUT_DEPTH' => OD,
+        type => proplists:get_value(type, dict:fetch(Input, Vars)),
+        padding => proplists:get_value(padding, Opts), padding_height => PH, padding_width => PW,
+        stride_width => StrideW, stride_height => StrideH,
+        has_bias => InputT =/= [],
+        activation => proplists:get_value(activation, Opts)
+    };
 prepare({op, conv_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->
     [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
     [OD, FH, FW, ID] = proplists:get_value(shape, dict:fetch(Filter, Vars)),
     [B, OH, OW, OD] = proplists:get_value(shape, dict:fetch(Output, Vars)),
-    {StrideW, StrideH} = proplists:get_value(stride, Opts),
-    {DilationW, DilationH} = proplists:get_value(dilation_factor, Opts),
+    {StrideW, StrideH} = proplists:get_value(stride, Opts, {1, 1}),
+    {DilationW, DilationH} = proplists:get_value(dilation_factor, Opts, {1, 1}),
     {PH, _PHO} = padding_with_offset(StrideH, DilationH, IH, FH, OH),
     {PW, _PWO} = padding_with_offset(StrideW, DilationW, IW, FW, OW),
     #{'BATCH_SIZE' => B, 'INPUT_HEIGHT' => IH, 'INPUT_WIDTH' => IW, 'INPUT_DEPTH' => ID,
-        'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH,
+        'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH, 'FILTER_DEPTH' => ID,
         'OUTPUT_HEIGHT' => OH, 'OUTPUT_WIDTH' => OW, 'OUTPUT_DEPTH' => OD,
         type => proplists:get_value(type, dict:fetch(Input, Vars)),
         dilation_width_factor => DilationW, dilation_height_factor => DilationH,
@@ -205,10 +223,10 @@ prepare({op, depthwise_conv_2d, [Input, Filter | InputT], [Output], Opts}, Vars)
     [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
     [1, FH, FW, OD] = proplists:get_value(shape, dict:fetch(Filter, Vars)),
     [B, OH, OW, OD] = proplists:get_value(shape, dict:fetch(Output, Vars)),
-    {StrideW, StrideH} = proplists:get_value(stride, Opts),
-    {DilationW, DilationH} = proplists:get_value(dilation_factor, Opts),
-    true = (OD == ID * proplists:get_value(depth_multiplier, Opts)),
-    Multi = proplists:get_value(depth_multiplier, Opts),
+    {StrideW, StrideH} = proplists:get_value(stride, Opts, {1, 1}),
+    {DilationW, DilationH} = proplists:get_value(dilation_factor, Opts, {1, 1}),
+    true = (OD == ID * proplists:get_value(depth_multiplier, Opts, 1)),
+    Multi = proplists:get_value(depth_multiplier, Opts, 1),
     true = ID * Multi == OD,
     {PH, _PHO} = padding_with_offset(StrideH, DilationH, IH, FH, OH),
     {PW, _PWO} = padding_with_offset(StrideW, DilationW, IW, FW, OW),
@@ -240,6 +258,24 @@ prepare({op, softmax, [Input], [Output], Opts}, Vars) ->
     true = prod(IS) == prod(OS),
     #{'BATCH_SIZE' => B, 'INPUT_SIZE' => prod(IS),
         beta => proplists:get_value(beta, Opts),
+        type => proplists:get_value(type, dict:fetch(Input, Vars))
+    };
+prepare({op, ceil, _, _, _Opts} = Op, Vars) ->
+    prepare_simple(Op, Vars);
+prepare({op, floor, _, _, _Opts} = Op, Vars) ->
+    prepare_simple(Op, Vars);
+prepare({op, logistic, _, _, _Opts} = Op, Vars) ->
+    prepare_simple(Op, Vars);
+prepare({op, neg, _, _, _Opts} = Op, Vars) ->
+    prepare_simple(Op, Vars);
+prepare({op, round, _, _, _Opts} = Op, Vars) ->
+    prepare_simple(Op, Vars).
+
+prepare_simple({op, _opName, [Input], [Output], _Opts}, Vars) ->
+    Shape1 = proplists:get_value(shape, dict:fetch(Input, Vars)),
+    Shape2 = proplists:get_value(shape, dict:fetch(Output, Vars)),
+    true = prod(Shape1) == prod(Shape2),
+    #{'FLAT_SIZE' => prod(Shape1),
         type => proplists:get_value(type, dict:fetch(Input, Vars))
     }.
 

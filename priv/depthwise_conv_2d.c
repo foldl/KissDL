@@ -1,4 +1,4 @@
-{{if type == float32}}void {{kernel_fun}}(const float *input, const float *filter, const float *bias, float *output)
+{{if type == float32}}static void {{kernel_fun}}(const float *input, const float *filter, const float *bias, float *output)
 {
     int b, in_d, out_y, out_x, f_y, f_x, m;
     for (b = 0; b < {{BATCH_SIZE}}; b++)

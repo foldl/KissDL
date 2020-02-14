@@ -1,7 +1,7 @@
 # KissDL
 
-A deep learning model compiler based on K.I.S.S. principle. This tool takes
-in a trained model, and generates a cold hard plain C99 implementation.
+A deep learning model compiler based on K.I.S.S. principle, which takes
+in a trained model, and generates a cold hard, plain, self-contained C99 implementation.
 
 Comparing to Tensorflow Lite, this compiler does two things that are missing in TF Lite:
 
@@ -50,7 +50,7 @@ Two C files will be generated under `a_proj_dir`, `main_demo.c` and `model.c`. T
 
 ## Build model
 
-Modify `main_demo.c` to feed in input data, then build the model with simple command:
+Modify `main_demo.c` to feed in input data, then build the model:
 
 ```bash
 gcc main_demo.c model.c

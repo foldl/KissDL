@@ -150,8 +150,13 @@ load_init(complex64, Bin, Acc) ->
         <<>> -> Acc
     end.
 
-read_template(X) when is_atom(X) ->
-    {ok, Content} = file:read_file(priv_fn(atom_to_list(X) ++ ".c")),
+read_template(X, Opts)->
+    {ok, Content} = case maps:get(template, Opts, X) of
+        A when is_atom(A) ->
+            file:read_file(priv_fn(atom_to_list(X) ++ ".c"));
+        L when is_list(L) ->
+            file:read_file(priv_fn(L ++ ".c"))
+    end,
     Content.
 
 gen_kernel(Op, Vars) ->
@@ -174,7 +179,7 @@ gen_kernel(Op, Vars) ->
                 (_) -> "???"
             end,
             put({Ker, Opts}, ScheduleName),
-            Content = read_template(Ker),
+            Content = read_template(Ker, Opts),
             Opts10 = maps:put(kernel_fun, ScheduleName, Opts),
             Result = kdl_template:run(Content, Opts10, Call),
             {ok, ScheduleName, Result};
@@ -187,22 +192,11 @@ padding_with_offset(Stride, DilationRate, InSize, FilterSize, OutSize) ->
     {TotalPadding div 2, TotalPadding rem 2}.
 
 prepare({op, average_pool_2d, [Input], [Output], Opts}, Vars) ->
-    prepare({op, max_pool_2d, [Input], [Output], Opts}, Vars);
+    prepare_pooling(average, [Input], [Output], Opts, Vars);
 prepare({op, max_pool_2d, [Input], [Output], Opts}, Vars) ->
-    [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
-    [B, OH, OW, OD] = proplists:get_value(shape, dict:fetch(Output, Vars)),
-    {StrideW, StrideH} = proplists:get_value(stride, Opts, {1, 1}),
-    {FW, FH} = proplists:get_value(filter, Opts, {1, 1}),
-    {PH, _PHO} = padding_with_offset(StrideH, 1, IH, FH, OH),
-    {PW, _PWO} = padding_with_offset(StrideW, 1, IW, FW, OW),
-    #{'BATCH_SIZE' => B, 'INPUT_HEIGHT' => IH, 'INPUT_WIDTH' => IW, 'INPUT_DEPTH' => ID,
-        'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH,
-        'OUTPUT_HEIGHT' => OH, 'OUTPUT_WIDTH' => OW, 'OUTPUT_DEPTH' => OD,
-        type => proplists:get_value(type, dict:fetch(Input, Vars)),
-        padding => proplists:get_value(padding, Opts), padding_height => PH, padding_width => PW,
-        stride_width => StrideW, stride_height => StrideH,
-        activation => proplists:get_value(activation, Opts)
-    };
+    prepare_pooling(max, [Input], [Output], Opts, Vars);
+prepare({op, l2_pool_2d, [Input], [Output], Opts}, Vars) ->
+    prepare_pooling(l2, [Input], [Output], Opts, Vars);
 prepare({op, conv_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->
     [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
     [OD, FH, FW, ID] = proplists:get_value(shape, dict:fetch(Filter, Vars)),
@@ -272,6 +266,24 @@ prepare({op, neg, _, _, _Opts} = Op, Vars) ->
     prepare_simple(Op, Vars);
 prepare({op, round, _, _, _Opts} = Op, Vars) ->
     prepare_simple(Op, Vars).
+
+prepare_pooling(Algo, [Input], [Output], Opts, Vars) ->
+    [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
+    [B, OH, OW, OD] = proplists:get_value(shape, dict:fetch(Output, Vars)),
+    {StrideW, StrideH} = proplists:get_value(stride, Opts, {1, 1}),
+    {FW, FH} = proplists:get_value(filter, Opts, {1, 1}),
+    {PH, _PHO} = padding_with_offset(StrideH, 1, IH, FH, OH),
+    {PW, _PWO} = padding_with_offset(StrideW, 1, IW, FW, OW),
+    #{'BATCH_SIZE' => B, 'INPUT_HEIGHT' => IH, 'INPUT_WIDTH' => IW, 'INPUT_DEPTH' => ID,
+        'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH,
+        'OUTPUT_HEIGHT' => OH, 'OUTPUT_WIDTH' => OW, 'OUTPUT_DEPTH' => OD,
+        type => proplists:get_value(type, dict:fetch(Input, Vars)),
+        padding => proplists:get_value(padding, Opts), padding_height => PH, padding_width => PW,
+        stride_width => StrideW, stride_height => StrideH,
+        activation => proplists:get_value(activation, Opts),
+        algo => Algo,
+        template => "pooling"
+    }.
 
 prepare_simple({op, _opName, [Input], [Output], _Opts}, Vars) ->
     Shape1 = proplists:get_value(shape, dict:fetch(Input, Vars)),

@@ -525,8 +525,14 @@ mutate(_Population, {Size, CandiDict}, AllGene) ->
                         true -> rnd_walk(N div 2);
                         _ -> -rnd_walk(N div 2)
                     end,
-                    {(V + Off + N) rem N, S}
+                    {mod(V + Off, N), S}
                 end, CandiDict).
+
+mod(X, Y) ->
+    case X rem Y of
+        V when V < 0 -> V + Y;
+        V -> V
+    end.
 
 crossover(Population, {_Size, CandiDict} = This, AllGene) ->
     Gene = choose(AllGene),

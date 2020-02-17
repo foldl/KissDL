@@ -6,6 +6,7 @@ compile(Fn, WorkDir) ->
     spawn(fun () -> compile0(Fn, WorkDir) end).
 
 compile0(Fn, WorkDir) ->
+    ok = filelib:ensure_dir(WorkDir),
     {ok, Ls} = file:consult(Fn),
     io:format("preparing for memory alloc optimization ... "),
     Prog = filename:join([WorkDir, "model.prog"]),
@@ -185,20 +186,21 @@ padding_with_offset(Stride, DilationRate, InSize, FilterSize, OutSize) ->
     TotalPadding = max(0, (OutSize - 1) * Stride + EffectFilterSize - InSize),
     {TotalPadding div 2, TotalPadding rem 2}.
 
-prepare({op, average_pool_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->
+prepare({op, average_pool_2d, [Input], [Output], Opts}, Vars) ->
+    prepare({op, max_pool_2d, [Input], [Output], Opts}, Vars);
+prepare({op, max_pool_2d, [Input], [Output], Opts}, Vars) ->
     [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
-    [OD, FH, FW, ID] = proplists:get_value(shape, dict:fetch(Filter, Vars)),
     [B, OH, OW, OD] = proplists:get_value(shape, dict:fetch(Output, Vars)),
     {StrideW, StrideH} = proplists:get_value(stride, Opts, {1, 1}),
+    {FW, FH} = proplists:get_value(filter, Opts, {1, 1}),
     {PH, _PHO} = padding_with_offset(StrideH, 1, IH, FH, OH),
     {PW, _PWO} = padding_with_offset(StrideW, 1, IW, FW, OW),
     #{'BATCH_SIZE' => B, 'INPUT_HEIGHT' => IH, 'INPUT_WIDTH' => IW, 'INPUT_DEPTH' => ID,
-        'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH, 'FILTER_DEPTH' => ID,
+        'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH,
         'OUTPUT_HEIGHT' => OH, 'OUTPUT_WIDTH' => OW, 'OUTPUT_DEPTH' => OD,
         type => proplists:get_value(type, dict:fetch(Input, Vars)),
         padding => proplists:get_value(padding, Opts), padding_height => PH, padding_width => PW,
         stride_width => StrideW, stride_height => StrideH,
-        has_bias => InputT =/= [],
         activation => proplists:get_value(activation, Opts)
     };
 prepare({op, conv_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->

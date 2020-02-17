@@ -21,6 +21,7 @@ def InitBuiltinCodeDict():
             op_code_dict[o.__getattribute__(x)] = "UNSUPPORTED " + x
     op_code_dict[o.CONV_2D] = 'conv_2d'
     op_code_dict[o.DEPTHWISE_CONV_2D] = 'depthwise_conv_2d'
+    op_code_dict[o.MAX_POOL_2D] = 'max_pool_2d'
     op_code_dict[o.FULLY_CONNECTED] = 'dense'
     op_code_dict[o.SOFTMAX] = 'softmax'
 
@@ -129,6 +130,12 @@ def parse_dense_opt(opt, props):
         raise "KeepNumDims is not supported"
     #props.append('{keep_num_dims, %s}' % opt.KeepNumDims())
 
+def parse_pool_2d_opt(opt, props):
+    props.append('{padding, %s}' % "same" if opt.Padding() == tflite.Padding.Padding.SAME else "zero")
+    props.append('{stride, {%s, %s}}' % (opt.StrideW(), opt.StrideH()))
+    props.append('{filter, {%s, %s}}' % (opt.FilterWidth(), opt.FilterHeight()))
+    props.append('{activation, %s}' % activate_fn_dict[opt.FusedActivationFunction()])
+
 def convert_op(model: tflite.Model.Model, g: tflite.SubGraph.SubGraph, o: tflite.Operator.Operator):
     code = model.OperatorCodes(o.OpcodeIndex()).BuiltinCode()
     inputs = []
@@ -156,6 +163,10 @@ def convert_op(model: tflite.Model.Model, g: tflite.SubGraph.SubGraph, o: tflite
         opt = tflite.SoftmaxOptions.SoftmaxOptions()
         opt.Init(ot.Bytes, ot.Pos)
         props.append('{beta, %s}' % opt.Beta())
+    elif o.BuiltinOptionsType() == tflite.BuiltinOptions.BuiltinOptions.Pool2DOptions:
+        opt = tflite.Pool2DOptions.Pool2DOptions()
+        opt.Init(ot.Bytes, ot.Pos)
+        parse_pool_2d_opt(opt, props)
 
     if o.CustomOptionsLength() > 0:
         raise Exception("CustomOptions is not supported")

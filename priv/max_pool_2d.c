@@ -17,12 +17,12 @@
                     const int f_y_start = max(0, in_y_origin);
                     const int f_y_end = min(f_y_start + {{FILTER_HEIGHT}}, {{INPUT_HEIGHT}});
 
-                    float total = 0.f;
+                    float vmax = input[f_y_start * {{INPUT_WIDTH}} * {{INPUT_DEPTH}} + f_x_start * {{INPUT_DEPTH}} + out_d];
                     for (f_y = f_y_start; f_y < f_y_end; f_y++)
                         for (f_x = f_x_start; f_x < f_x_end; f_x++)
-                            total += input[f_y * {{INPUT_WIDTH}} * {{INPUT_DEPTH}} + f_x * {{INPUT_DEPTH}} + out_d];
-                    total /= (f_y_end - f_y_start) * (f_x_end - f_x_start);
-                    output[f_y * {{OUTPUT_WIDTH}} * {{OUTPUT_DEPTH}} + f_x * {{OUTPUT_DEPTH}} + out_d] = {{call act total}};
+                            vmax = fmax(vmax, input[f_y * {{INPUT_WIDTH}} * {{INPUT_DEPTH}} + f_x * {{INPUT_DEPTH}} + out_d]);
+
+                    output[f_y * {{OUTPUT_WIDTH}} * {{OUTPUT_DEPTH}} + f_x * {{OUTPUT_DEPTH}} + out_d] = {{call act vmax}};
                 }
             }
         }

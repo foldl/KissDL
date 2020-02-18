@@ -2,7 +2,7 @@
 
 1. tiny_conv_graph.tflite
 
-    A trained Tensorflow [spech_commands](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/speech_commands) model.
+    A trained Tensorflow [speech_commands](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/speech_commands) model.
 
     Trained with following parameters:
 
@@ -18,7 +18,7 @@
 
 1. tiny_embedding_conv_graph.tflite
 
-    A trained Tensorflow [spech_commands](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/speech_commands) model.
+    A trained Tensorflow [speech_commands](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/speech_commands) model.
 
     Trained with following parameters:
 
@@ -31,3 +31,7 @@
     ```
     python freeze.py --start_checkpoint=\tmp\speech_commands_train\tiny_embedding_conv.ckpt-18000 --output_file=\tmp\tiny_embedding_conv_graph.pb --model_architecture=tiny_embedding_conv --preprocess=micro --window_stride=20
     ```
+
+1. conv_graph.tflite
+
+    A trained Tensorflow [speech_commands](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/examples/speech_commands) model like above, but using the "conv" model, and "MFCC" feature.

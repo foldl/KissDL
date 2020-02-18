@@ -23,6 +23,7 @@ def InitBuiltinCodeDict():
     op_code_dict[o.DEPTHWISE_CONV_2D] = 'depthwise_conv_2d'
     op_code_dict[o.MAX_POOL_2D] = 'max_pool_2d'
     op_code_dict[o.L2_POOL_2D] = 'l2_pool_2d'
+    op_code_dict[o.AVERAGE_POOL_2D] = 'average_pool_2d'
     op_code_dict[o.FULLY_CONNECTED] = 'dense'
     op_code_dict[o.SOFTMAX] = 'softmax'
 

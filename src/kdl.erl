@@ -48,10 +48,15 @@ compile0(Fn, WorkDir) ->
             DataId = proplists:get_value(data, Var),
             DataFn = filename:join([filename:dirname(Fn), integer_to_list(DataId) ++ ".dat"]),
             OFn = filename:join([WorkDir, integer_to_list(DataId) ++ ".dat"]),
-            write_init(T, DataFn, OFn),
+            write_init(int8, DataFn, OFn),
             io:format(Fid, "// shape of ~ts is ~w~n", [N, proplists:get_value(shape, Var)]),
-            io:format(Fid, "const ~p ~ts[] = {~n    #include \"~p.dat\"~n};~n",
-                         [c_type(T), to_c_ident(N), proplists:get_value(data, Var)])
+            io:format(Fid, "static const int8_t ~ts_container[] = {~n    #include \"~p.dat\"~n};~n",
+                        [to_c_ident(N), proplists:get_value(data, Var)]),
+            io:format(Fid, "const ~p *~ts = (const ~p *)~ts_container;~n",
+                        [c_type(T), to_c_ident(N), c_type(T), to_c_ident(N)])
+
+            %io:format(Fid, "const ~p ~ts[] = {~n    #include \"~p.dat\"~n};~n",
+            %             [c_type(T), to_c_ident(N), proplists:get_value(data, Var)])
         end, Inited),
 
     io:format(Fid, "~n", []),

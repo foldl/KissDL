@@ -1,6 +1,6 @@
 -module(kdl_alloc).
 
--export([start/0, start/3, start/2]).
+-export([start/1, start/2, start/3]).
 
 -record(prog,
     {
@@ -13,8 +13,7 @@
 
 -define(INIT_POPU_SIZE, 100).
 
-start() ->
-    start("test.erl", self()).
+start(Fn) -> start(Fn, undefined).
 
 start(Fn, Pid) -> start(Fn, filename:rootname(Fn) ++ "-run/", Pid).
 
@@ -62,13 +61,13 @@ ga_supervisor(PidDict, RptPid) ->
         {done, ID} ->
             dict:fold(fun (_ID0, {Pid, _V}, _Acc) -> Pid ! kill end, 0, PidDict),
             error_logger:info_report("Job done."),
-            RptPid ! {done, ?MODULE, ID};
+            notify(RptPid, {done, ?MODULE, ID});
         {quit, ID} ->
             PidDict10 = dict:erase(ID, PidDict),
             case dict:size(PidDict10) of
                 0 ->
                     error_logger:info_report("All workers exit."),
-                    RptPid ! {fail, ?MODULE};
+                    notify(RptPid, {fail, ?MODULE});
                 _ -> ga_supervisor(PidDict10, RptPid)
             end;
         Msg ->
@@ -78,6 +77,9 @@ ga_supervisor(PidDict, RptPid) ->
             dict:map(fun (_ID, {Pid, _V}) -> Pid ! {i, self()} end, PidDict),
             ga_supervisor(PidDict, RptPid)
     end.
+
+notify(RptPid, Msg) when is_pid(RptPid) -> RptPid ! Msg;
+notify(_RptPid, _Msg) -> ok.
 
 load({func, Name, Inputs, Outputs, Alias},
         #prog{varDict = VarDict, aliasSets = AliasSets, modDict = ModDict} = Prog) ->

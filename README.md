@@ -7,7 +7,7 @@ Comparing to Tensorflow Lite, this compiler does two things that are missing in 
 
 * Memory optimization
 
-    * Using Genetic Algorithm for optimal static memory allocation (see [GAAlloc](https://github.com/foldl/GAAlloc))
+    * Using Genetic Algorithm for optimal static memory allocation (see [GAAlloc](GAAlloc.md))
 
 * C99 code generation
 

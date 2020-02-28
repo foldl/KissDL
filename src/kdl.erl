@@ -1,16 +1,20 @@
 -module(kdl).
 
--export([compile/2, test/0]).
+-export([compile/2, compile/3, test/0]).
 
-compile(Fn, WorkDir) ->
-    spawn(fun () -> compile0(Fn, WorkDir) end).
+compile(Fn, WorkDir) -> compile(Fn, WorkDir, []).
 
-compile0(Fn, WorkDir) ->
+compile(Fn, WorkDir, Opts) ->
+    spawn(fun () -> compile0(Fn, WorkDir, Opts) end).
+
+compile0(Fn, WorkDir, CompileOpts) ->
+    AlignOpt = proplists:get_value(align, CompileOpts, auto),
+    UseRaw = proplists:get_value(raw, CompileOpts, true),
     ok = filelib:ensure_dir(WorkDir),
     {ok, Ls} = file:consult(Fn),
     io:format("preparing for memory alloc optimization ... "),
     Prog = filename:join([WorkDir, "model.prog"]),
-    convert_to_prog(Ls, Prog),
+    convert_to_prog(Ls, Prog, AlignOpt),
     io:format("start optimizing~n"),
     kdl_alloc:start(Prog, self()),
     {Schedule, Size, Addresses} = load_alloc_result(filename:join([WorkDir, "model-run"]), wait_for_id()),
@@ -37,8 +41,13 @@ compile0(Fn, WorkDir) ->
     lists:foreach(fun ({N, {A, _S}}) ->
             Var = dict:fetch(N, Vars),
             T = c_type(proplists:get_value(type, Var)),
+            Align = align_of_type(proplists:get_value(type, Var), AlignOpt),
+            A10 = A + case A rem Align of
+                0 -> 0;
+                ARem -> Align - ARem
+            end,
             io:format(Fid, "// shape of ~ts is ~w~n", [N, proplists:get_value(shape, Var)]),
-            io:format(Fid, "~p * const ~ts = (~p *)(model_arena + ~p);~n", [T, to_c_ident(N), T, A])
+            io:format(Fid, "~p * const ~ts = (~p *)(model_arena + ~p);~n", [T, to_c_ident(N), T, A10])
         end, Addresses),
 
     io:format(Fid, "~n// constants~n", []),
@@ -48,15 +57,19 @@ compile0(Fn, WorkDir) ->
             DataId = proplists:get_value(data, Var),
             DataFn = filename:join([filename:dirname(Fn), integer_to_list(DataId) ++ ".dat"]),
             OFn = filename:join([WorkDir, integer_to_list(DataId) ++ ".dat"]),
-            write_init(int8, DataFn, OFn),
-            io:format(Fid, "// shape of ~ts is ~w~n", [N, proplists:get_value(shape, Var)]),
-            io:format(Fid, "static const int8_t ~ts_container[] = {~n    #include \"~p.dat\"~n};~n",
-                        [to_c_ident(N), proplists:get_value(data, Var)]),
-            io:format(Fid, "const ~p *~ts = (const ~p *)~ts_container;~n",
-                        [c_type(T), to_c_ident(N), c_type(T), to_c_ident(N)])
-
-            %io:format(Fid, "const ~p ~ts[] = {~n    #include \"~p.dat\"~n};~n",
-            %             [c_type(T), to_c_ident(N), proplists:get_value(data, Var)])
+            case UseRaw of
+                true ->
+                    write_init(uint8, DataFn, OFn),
+                    io:format(Fid, "// shape of ~ts is ~w~n", [N, proplists:get_value(shape, Var)]),
+                    io:format(Fid, "static const int8_t ~ts_container[] = {~n    #include \"~p.dat\"~n};~n",
+                                [to_c_ident(N), proplists:get_value(data, Var)]),
+                    io:format(Fid, "const ~p *~ts = (const ~p *)~ts_container;~n",
+                                [c_type(T), to_c_ident(N), c_type(T), to_c_ident(N)]);
+                _ ->
+                    write_init(T, DataFn, OFn),
+                    io:format(Fid, "const ~p ~ts[] = {~n    #include \"~p.dat\"~n};~n",
+                         [c_type(T), to_c_ident(N), proplists:get_value(data, Var)])
+            end
         end, Inited),
 
     io:format(Fid, "~n", []),
@@ -136,15 +149,20 @@ load_init(float32, Bin, Acc) ->
 load_init(float16, Bin, Acc) -> load_init(int16, Bin, Acc);
 load_init(int32, Bin, Acc) ->
     case Bin of
-        <<V:32/little-integer, Rem/binary>> -> load_init(int32, Rem, [V | Acc]);
+        <<V:32/signed-little-integer, Rem/binary>> -> load_init(int32, Rem, [V | Acc]);
         <<>> -> Acc
     end;
 load_init(int16, Bin, Acc) ->
     case Bin of
-        <<V:16/little-integer, Rem/binary>> -> load_init(int16, Rem, [V | Acc]);
+        <<V:16/signed-little-integer, Rem/binary>> -> load_init(int16, Rem, [V | Acc]);
         <<>> -> Acc
     end;
 load_init(int8, Bin, Acc) ->
+    case Bin of
+        <<V:8/signed-little-integer, Rem/binary>> -> load_init(int8, Rem, [V | Acc]);
+        <<>> -> Acc
+    end;
+load_init(uint8, Bin, Acc) ->
     case Bin of
         <<V:8/little-integer, Rem/binary>> -> load_init(int8, Rem, [V | Acc]);
         <<>> -> Acc
@@ -330,12 +348,16 @@ wait_for_id() ->
             ID
     end.
 
-convert_to_prog(Ls, Fn) ->
+align_of_type(_Type, 1) -> 1;
+align_of_type(Type, auto) -> sizeof(Type).
+
+convert_to_prog(Ls, Fn, AlignOpt) ->
     {ok, Fid} = file:open(Fn, [write]),
     [{inputs, Ins}, {outputs, Outs}] = hd(Ls),
     Vars = lists:foldl(fun
-                ({tensor, Name, _Type, _Shape, Opts} = Tensor, Acc) ->
-                    Info = [{size, sizeof(Tensor)}, {init, proplists:get_value(data, Opts) =/= undefined}],
+                ({tensor, Name, Type, _Shape, Opts} = Tensor, Acc) ->
+                    TensorSize = sizeof(Tensor) + align_of_type(Type, AlignOpt) - 1,
+                    Info = [{size, TensorSize}, {init, proplists:get_value(data, Opts) =/= undefined}],
                     dict:store(Name, Info, Acc);
                 (_, Acc) -> Acc
             end, dict:new(), Ls),
@@ -420,4 +442,4 @@ load_alloc_result(Path, Id) ->
     {Schedule, Size, Addresses}.
 
 test() ->
-    compile("./examples/tiny_conv_graph.emodel", "/tmp/dl_proj").
+    compile("./examples/conv_graph.emodel", "/tmp/dl_proj").

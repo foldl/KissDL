@@ -305,14 +305,12 @@ pick_item([H | T], I, Acc) -> pick_item(T, I - 1, [H | Acc]).
 
 % Candi = [{V, {A, S}}] must be sorted!
 clean_hole(Candi) ->
-    {{Size, _}, R} = lists:foldl(fun
-                    ({V, {A, S}}, {{Last, OffAcc}, Acc}) when A - OffAcc > Last ->
-                        Off1 = OffAcc + A - Last,
-                        {{Last + S, Off1}, [{V, {A - Off1, S}} | Acc]};
-                    ({V, {A, S}}, {{Last, OffAcc}, Acc}) ->
-                        A1 = A - OffAcc,
-                        {{max(Last, A1 + S), OffAcc}, [{V, {A1, S}} | Acc]}
-                end, {{0, 0}, []}, Candi),
+    {Size, R} = lists:foldl(fun
+                    ({V, {A, S}}, {SizeAcc, Acc}) when A > SizeAcc ->
+                        {SizeAcc + S , [{V, {SizeAcc, S}} | Acc]};
+                    ({V, {A, S}}, {SizeAcc, Acc}) ->
+                        {max(SizeAcc, A + S), [{V, {A, S}} | Acc]}
+                end, {0, []}, Candi),
     {Size, lists:reverse(R)}.
 
 analyze_prog(Prog) ->
@@ -506,7 +504,6 @@ nature_sel(Population, VarGroups, NewGen, PopulationSize) ->
                     _ -> Acc
                 end
                 end, [], NewGen),
-
     % merge with parent generation
     All = lists:umerge(Population, lists:usort(Survivals)),
     lists:sublist(All, PopulationSize).
@@ -528,11 +525,13 @@ mutate(_Population, {Size, CandiDict}, AllGene) ->
                     {mod(V + Off, N), S}
                 end, CandiDict).
 
-mod(X, Y) ->
-    case X rem Y of
+mod(X, Y) when Y > 0 ->
+    R = case X rem Y of
         V when V < 0 -> V + Y;
         V -> V
-    end.
+    end,
+    true = R >= 0,
+    R.
 
 crossover(Population, {_Size, CandiDict} = This, AllGene) ->
     Gene = choose(AllGene),
@@ -572,9 +571,18 @@ pmap_f(Parent, F, I) ->
 -if(defined(TEST)).
 %% test
 clean_hole_test() ->
-    io:format("~p~n", [clean_hole([{"a", {0, 10}}, {"b", {20, 10}}, {"c", {30, 10}}])]),
-    io:format("~p~n", [clean_hole([{"a", {0, 10}}, {"b", {5, 10}}, {"c", {30, 10}}])]),
-    io:format("~p~n", [clean_hole([{"a", {0, 10}}, {"b", {10, 8}}, {"c", {19, 10}}])]).
+    clean_hole([{"a", {0, 10}}, {"b", {20, 10}}, {"c", {30, 10}}])] == {30,[{"a",{0,10}},{"b",{10,10}},{"c",{20,10}}]},
+    clean_hole([{"a", {0, 10}}, {"b", {5, 10}}, {"c", {30, 10}}])]) == {25,[{"a",{0,10}},{"b",{5,10}},{"c",{15,10}}]},
+    clean_hole([{"a", {0, 10}}, {"b", {10, 8}}, {"c", {19, 10}}])]) == {28,[{"a",{0,10}},{"b",{10,8}},{"c",{18,10}}]}.
+
+clean_hole_test2() ->
+    D = [{"Reshape_1",{80279,7843}},
+         {"labels_softmax",{128003,19}},
+         {"Relu_1",{128022,128003}},
+         {"MaxPool2d",{174228,128003}},
+         {"Relu",{256025,501763}},
+         {"add_2",{757788,19}}],
+    io:format("~p~n", [clean_hole(D)]).
 
 analyze_prog_test() ->
     R = analyze_prog(

@@ -101,7 +101,6 @@ compile0(Fn, WorkDir, CompileOpts) ->
             (_) -> false
         end, Ls),
 
-    io:format("~p~n", [{Inputs, Outputs}]),
     gen_main(Inputs, Outputs, Vars, WorkDir),
 
     file:close(Fid),
@@ -419,6 +418,8 @@ prod(Ls) -> lists:foldl(fun (A, Prod) -> A * Prod end, 1, Ls).
 get_intermidiates(_Op, _Vars) ->
     [].
 
+get_aliases({op, reshape, OpIns, OpOuts, _Opts} = _Op, _Vars) ->
+    OpIns ++ OpOuts;
 get_aliases(_Op, _Vars) ->
     [].
 

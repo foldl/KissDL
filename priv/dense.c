@@ -1,4 +1,4 @@
-// weights is of shape [OUTPUT_SIZE, INPUTSIZE]
+// weights is of shape [{{OUTPUT_SIZE}}, {{INPUTSIZE}}]
 {{if type == float32}}static void {{kernel_fun}}(const float *input, const float *weights, const float *bias, float *output)
 {
     int b;

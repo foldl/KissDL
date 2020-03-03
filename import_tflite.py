@@ -169,6 +169,11 @@ def convert_op(model: tflite.Model.Model, g: tflite.SubGraph.SubGraph, o: tflite
         opt = tflite.Pool2DOptions.Pool2DOptions()
         opt.Init(ot.Bytes, ot.Pos)
         parse_pool_2d_opt(opt, props)
+    elif o.BuiltinOptionsType() == tflite.BuiltinOptions.BuiltinOptions.AddOptions:
+        opt = tflite.AddOptions.AddOptions()
+        opt.Init(ot.Bytes, ot.Pos)
+        props.append('{activation, %s}' % activate_fn_dict[opt.FusedActivationFunction()])
+
 
     if o.CustomOptionsLength() > 0:
         raise Exception("CustomOptions is not supported")
@@ -180,7 +185,7 @@ def convert_op(model: tflite.Model.Model, g: tflite.SubGraph.SubGraph, o: tflite
         props.append('{mutating_inputs, [%s]}' % ', '.join(bs))
 
     if o.IntermediatesLength() > 0:
-        props.append('{intermediates, %s}' % get_tensors_name(o.IntermediatesAsNumpy().tolist()))
+        props.append('{intermediates, %s}' % get_tensors_name(g, o.IntermediatesAsNumpy().tolist()))
 
     return s + ', '.join(props) + ']}.'
 

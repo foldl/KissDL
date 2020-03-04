@@ -12,10 +12,10 @@
                 for (out_d = 0; out_d < {{OUTPUT_DEPTH}}; out_d++)
                 {
                     const int f_x_start = max(0, in_x_origin);
-                    const int f_x_end = min(f_x_start + {{FILTER_WIDTH}}, {{INPUT_WIDTH}} - 1);
+                    const int f_x_end = min(in_x_origin + {{FILTER_WIDTH}}, {{INPUT_WIDTH}});
 
                     const int f_y_start = max(0, in_y_origin);
-                    const int f_y_end = min(f_y_start + {{FILTER_HEIGHT}}, {{INPUT_HEIGHT}} - 1);
+                    const int f_y_end = min(in_y_origin + {{FILTER_HEIGHT}}, {{INPUT_HEIGHT}});
 
                     {{if algo == max}}float vmax = input[f_y_start * {{INPUT_WIDTH}} * {{INPUT_DEPTH}} + f_x_start * {{INPUT_DEPTH}} + out_d];
                     for (f_y = f_y_start; f_y < f_y_end; f_y++)

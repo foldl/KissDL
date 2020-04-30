@@ -2,6 +2,8 @@
 
 -export([compile/2, compile/3, test/0]).
 
+-define(progress, io:format(".", [])).
+
 compile(Fn, WorkDir) -> compile(Fn, WorkDir, []).
 
 compile(Fn, WorkDir, Opts) ->
@@ -52,6 +54,7 @@ compile0(Fn, WorkDir, CompileOpts) ->
 
     io:format(Fid, "~n// constants~n", []),
     lists:foreach(fun (N) ->
+            ?progress,
             Var = dict:fetch(N, Vars),
             T = proplists:get_value(type, Var),
             DataId = proplists:get_value(data, Var),
@@ -76,6 +79,7 @@ compile0(Fn, WorkDir, CompileOpts) ->
 
     KerDict = lists:foldl(fun
             ({op, OpName, Input, Output, _Opts} = Op, Acc) ->
+                ?progress,
                 case gen_kernel(Op, Vars) of
                     {ok, ScheduleName, Code} ->
                         file:write(Fid, Code),
@@ -101,6 +105,7 @@ compile0(Fn, WorkDir, CompileOpts) ->
             (_) -> false
         end, Ls),
 
+    ?progress,
     gen_main(Inputs, Outputs, Vars, WorkDir),
 
     file:close(Fid),
@@ -227,7 +232,7 @@ prepare({op, conv_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->
     {DilationW, DilationH} = proplists:get_value(dilation_factor, Opts, {1, 1}),
     {PH, _PHO} = padding_with_offset(StrideH, DilationH, IH, FH, OH),
     {PW, _PWO} = padding_with_offset(StrideW, DilationW, IW, FW, OW),
-    #{'BATCH_SIZE' => B, 'INPUT_HEIGHT' => IH, 'INPUT_WIDTH' => IW, 'INPUT_DEPTH' => ID,
+    Basic = #{'BATCH_SIZE' => B, 'INPUT_HEIGHT' => IH, 'INPUT_WIDTH' => IW, 'INPUT_DEPTH' => ID,
         'FILTER_WIDTH' => FW, 'FILTER_HEIGHT' => FH, 'FILTER_DEPTH' => ID,
         'OUTPUT_HEIGHT' => OH, 'OUTPUT_WIDTH' => OW, 'OUTPUT_DEPTH' => OD,
         type => proplists:get_value(type, dict:fetch(Input, Vars)),
@@ -236,7 +241,9 @@ prepare({op, conv_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->
         stride_width => StrideW, stride_height => StrideH,
         has_bias => InputT =/= [],
         activation => proplists:get_value(activation, Opts)
-    };
+    },
+    QuantOpts = quantization_opts(Input, Filter, Output),
+    maps:merge(Basic, QuantOpts);
 prepare({op, depthwise_conv_2d, [Input, Filter | InputT], [Output], Opts}, Vars) ->
     [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
     [1, FH, FW, OD] = proplists:get_value(shape, dict:fetch(Filter, Vars)),
@@ -287,7 +294,17 @@ prepare({op, logistic, _, _, _Opts} = Op, Vars) ->
 prepare({op, neg, _, _, _Opts} = Op, Vars) ->
     prepare_simple(Op, Vars);
 prepare({op, round, _, _, _Opts} = Op, Vars) ->
-    prepare_simple(Op, Vars).
+    prepare_simple(Op, Vars);
+prepare({op, reshape, [In1, _In2], Out, Opts} = _Op, Vars) ->
+    prepare_simple({op, reshape, [In1], Out, Opts}, Vars).
+
+quantization_opts(Input, Filter, Output) ->
+    #{filter_offset => 0,
+      input_offset => 0,
+      out_shift => 0,
+      output_multiplier => 0,
+      output_activation_min => 0,
+      output_activation_max => 0}.
 
 prepare_pooling(Algo, [Input], [Output], Opts, Vars) ->
     [B, IH, IW, ID] = proplists:get_value(shape, dict:fetch(Input, Vars)),
@@ -316,7 +333,7 @@ prepare_simple({op, _opName, [Input], [Output], _Opts}, Vars) ->
     }.
 
 write_init(Type, Fn, OFn) when is_list(Fn) ->
-    {ok, [Bin]} = file:consult(Fn),
+    {ok, Bin} = file:read_file(Fn),
     Values = lists:reverse(load_init(Type, Bin, [])),
     {ok, Fid} = file:open(OFn, [write]),
     [T] = io_lib:format("~p", [Values]),
@@ -343,8 +360,8 @@ wait_for_id() ->
         {fail, kdl_alloc} ->
             io:format("try to run again.", []),
             throw(fail);
-        {done, kdl_alloc, ID} ->
-            ID
+        {done, kdl_alloc, ID} -> ID;
+        {best, kdl_alloc, ID} -> ID
     end.
 
 align_of_type(_Type, 1) -> 1;
@@ -392,11 +409,13 @@ c_type(float32) -> float;
 c_type(float16) -> int16_t;
 c_type(int32) -> int32_t;
 c_type(int8) -> int8_t;
+c_type(uint8) -> uint8_t;
 c_type(int64) -> int64_t;
 c_type(bool) -> bool;
 c_type(int16) -> int16_t.
 
 fmt_char(int8_t) -> d;
+fmt_char(uint8_t) -> d;
 fmt_char(int16_t) -> d;
 fmt_char(int32_t) -> d;
 fmt_char(int64_t) -> lld;
@@ -407,6 +426,7 @@ sizeof(float32) -> 4;
 sizeof(float16) -> 2;
 sizeof(int32) -> 4;
 sizeof(int8) -> 1;
+sizeof(uint8) -> 1;
 sizeof(int64) -> 8;
 sizeof(bool) -> 1;
 sizeof(int16) -> 2;
@@ -418,15 +438,15 @@ prod(Ls) -> lists:foldl(fun (A, Prod) -> A * Prod end, 1, Ls).
 get_intermidiates(_Op, _Vars) ->
     [].
 
-get_aliases({op, reshape, OpIns, OpOuts, _Opts} = _Op, _Vars) ->
-    OpIns ++ OpOuts;
+get_aliases({op, reshape, [In, _Shape] = _OpIns, OpOuts, _Opts} = _Op, _Vars) ->
+    [[In | OpOuts]];
 get_aliases(_Op, _Vars) ->
     [].
 
 gen_key(K, S) ->
     case sets:is_element(K, S) of
-        true -> gen_key(K ++ "!", S, 1);
-        _ -> {K, S}
+        true -> gen_key(K ++ "_", S, 1);
+        _ -> {K, sets:add_element(K, S)}
     end.
 
 gen_key(K, S, N) ->
@@ -439,8 +459,17 @@ gen_key(K, S, N) ->
 load_alloc_result(Path, Id) ->
     {ok, [Schedules]} = file:consult(filename:join([Path, "schedule"])),
     Schedule = dict:fetch(Id, dict:from_list(Schedules)),
-    {ok, [{size, Size}, {map, Addresses} | _]} = file:consult(filename:join([Path, integer_to_list(Id) ++ ".done"])),
-    {Schedule, Size, Addresses}.
+    {ok, [{size, Size}, {map, Addresses} | _]} = file:consult(filename:join([Path, integer_to_list(Id) ++ ".save"])),
+    {ok, [Alias, _Inputs, _Outputs]} = file:consult(filename:join([Path, "prog"])),
+    AliasDict = maps:from_list(Alias),
+    % populate aliases
+    Addresses10 = lists:foldl(fun ({Var, Addr}, Acc) ->
+            case maps:get(Var, AliasDict, undefined) of
+                undefined -> [{Var, Addr} | Acc];
+                L -> [{X, Addr} || X <- L] ++ Acc
+            end
+        end, [], Addresses),
+    {Schedule, Size, Addresses10}.
 
 test() ->
     compile("./examples/conv_graph.emodel", "/tmp/dl_proj").

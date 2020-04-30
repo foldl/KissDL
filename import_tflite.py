@@ -26,6 +26,7 @@ def InitBuiltinCodeDict():
     op_code_dict[o.AVERAGE_POOL_2D] = 'average_pool_2d'
     op_code_dict[o.FULLY_CONNECTED] = 'dense'
     op_code_dict[o.SOFTMAX] = 'softmax'
+    op_code_dict[o.RESHAPE] = 'reshape'
 
     o = tflite.ActivationFunctionType.ActivationFunctionType()
     activate_fn_dict[o.NONE] = 'none'
@@ -78,16 +79,13 @@ def format_quantization(q: tflite.QuantizationParameters.QuantizationParameters)
         raise Exception('unsupported QuantizationDetails')
 
     if q.QuantizedDimension() != 0:
-        items.append('{dimention, %s}' % (q.QuantizedDimension()))
+        items.append('{dimension, %s}' % (q.QuantizedDimension()))
 
     return '{quantization, [' + ', '.join(items) + ']}'
 
 def get_buffer(m: tflite.Model.Model, i):
     b = m.Buffers(i)
-    d = ''
-    if b.DataLength() > 0:
-        d = str(b.DataAsNumpy().tolist())[1:-1]
-    return d
+    return b.DataAsNumpy() if b.DataLength() > 0 else []
 
 def convert_tensor(m, tensor: tflite.Tensor.Tensor, fpath, id):
     s = '{tensor, "%s", %s, %s, ' % (
@@ -104,21 +102,21 @@ def convert_tensor(m, tensor: tflite.Tensor.Tensor, fpath, id):
 
     props.append('{is_var, %s}' % (str(tensor.IsVariable()).lower()))
     data = get_buffer(m, tensor.Buffer())
-    if data != '':
-        with open(join(fpath, '%s.dat' % id), 'w') as f:
-            f.write("<<" + data + ">>.")
+    if len(data) > 0:
+        with open(join(fpath, '%s.dat' % id), 'wb') as f:
+            f.write(bytearray(data))
         props.append('{data, %s}' % id)
 
     return s + '[' + ', '.join(props) + ']}.'
 
 def parse_conv2d_opt(opt: tflite.Conv2DOptions.Conv2DOptions, props: list):
-    props.append('{padding, %s}' % "same" if opt.Padding() == tflite.Padding.Padding.SAME else "zero")
+    props.append('{padding, %s}' % ("same" if opt.Padding() == tflite.Padding.Padding.SAME else "valid"))
     props.append('{stride, {%s, %s}}' % (opt.StrideW(), opt.StrideH()))
     props.append('{activation, %s}' % activate_fn_dict[opt.FusedActivationFunction()])
     props.append('{dilation_factor, {%s, %s}}' % (opt.DilationWFactor(), opt.DilationHFactor()))
 
 def parse_depth2d_opt(opt, props):
-    props.append('{padding, %s}' % "same" if opt.Padding() == tflite.Padding.Padding.SAME else "zero")
+    props.append('{padding, %s}' % ("same" if opt.Padding() == tflite.Padding.Padding.SAME else "valid"))
     props.append('{stride, {%s, %s}}' % (opt.StrideW(), opt.StrideH()))
     props.append('{depth_multiplier, %s}' % opt.DepthMultiplier())
     props.append('{activation, %s}' % activate_fn_dict[opt.FusedActivationFunction()])
@@ -133,7 +131,7 @@ def parse_dense_opt(opt, props):
     #props.append('{keep_num_dims, %s}' % opt.KeepNumDims())
 
 def parse_pool_2d_opt(opt, props):
-    props.append('{padding, %s}' % "same" if opt.Padding() == tflite.Padding.Padding.SAME else "zero")
+    props.append('{padding, %s}' % ("same" if opt.Padding() == tflite.Padding.Padding.SAME else "valid"))
     props.append('{stride, {%s, %s}}' % (opt.StrideW(), opt.StrideH()))
     props.append('{filter, {%s, %s}}' % (opt.FilterWidth(), opt.FilterHeight()))
     props.append('{activation, %s}' % activate_fn_dict[opt.FusedActivationFunction()])
@@ -173,6 +171,10 @@ def convert_op(model: tflite.Model.Model, g: tflite.SubGraph.SubGraph, o: tflite
         opt = tflite.AddOptions.AddOptions()
         opt.Init(ot.Bytes, ot.Pos)
         props.append('{activation, %s}' % activate_fn_dict[opt.FusedActivationFunction()])
+    elif o.BuiltinOptionsType() == tflite.BuiltinOptions.BuiltinOptions.ReshapeOptions:
+        opt = tflite.ReshapeOptions.ReshapeOptions()
+        opt.Init(ot.Bytes, ot.Pos)
+        props.append('{shape, %s}' % opt.NewShapeAsNumpy().tolist())
 
 
     if o.CustomOptionsLength() > 0:

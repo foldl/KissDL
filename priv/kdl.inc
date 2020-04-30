@@ -25,5 +25,54 @@
 
 #endif
 
+#define _ATTRIBUTE_ __attribute__((weak))
+
 void model_run(void);
 
+// fixed point (Q31) multiplication with saturation
+int32_t q31_mult_sat(int32_t a, int32_t b)
+{
+    if ((a == b) && (a = 0x80000000))
+        return 0x80000000;
+    else
+    {
+        int64_t t = a * b;
+        int64_t rounding = t >= 0 ? (1 << 30) : (1 - (1 << 30));
+        return (t + rounding) >> 31;
+    }
+}
+
+// fixed point (Q15) multiplication with saturation
+int16_t q15_mult_sat(int16_t a, int16_t b)
+{
+    if ((a == b) && (a = 0x8000))
+        return 0x8000;
+    else
+    {
+        int32_t t = a * b;
+        int32_t rounding = t >= 0 ? (1 << 14) : (1 - (1 << 14));
+        return (t + rounding) >> 15;
+    }
+}
+
+// shift must be > 0
+int16_t i16_round_shift_right(int16_t v, int shift)
+{
+    int16_t rounding;
+    int16_t r;
+    rounding = v & (1 << (shift - 1));
+    r = v >> shift;
+    if (rounding) r++;
+    return r;
+}
+
+// shift must be > 0
+int32_t i32_round_shift_right(int32_t v, int shift)
+{
+    int32_t rounding;
+    int32_t r;
+    rounding = v & (1 << (shift - 1));
+    r = v >> shift;
+    if (rounding) r++;
+    return r;
+}

@@ -38,6 +38,12 @@ get_tmpl_value(K, Dict, Def) ->
 to_list(V) when not is_list(V) -> lists:flatten(io_lib:format("~p", [V]));
 to_list(V) -> V.
 
+to_number(L) ->
+    case (catch list_to_integer(L)) of
+        V when is_integer(V) -> V;
+        _ -> list_to_float(L)
+    end.
+
 exec([], _Dict, _Call, Acc) -> lists:flatten(Acc);
 exec([#item_text{data = Data} | T], Dict, Call, Acc) -> exec(T, Dict, Call, [Data | Acc]);
 exec([#item_call{param = Param} | T], Dict, Call, Acc) -> exec(T, Dict, Call, [Call(string:split(Param, " ", all)) | Acc]);
@@ -47,6 +53,10 @@ exec([#item_if{test = Test, then = Then, else = Else} | T], Dict, Call, Acc) ->
         [Word] -> get_tmpl_value(Word, Dict, false) == "true";
         [Word, "==", V] -> V == get_tmpl_value(Word, Dict);
         [Word, "!=", V] -> V /= get_tmpl_value(Word, Dict);
+        [Word, ">", V] -> to_number(V) > to_number(get_tmpl_value(Word, Dict));
+        [Word, ">=", V] -> to_number(V) >= to_number(get_tmpl_value(Word, Dict));
+        [Word, "<", V] -> to_number(V) < to_number(get_tmpl_value(Word, Dict));
+        [Word, "<=", V] -> to_number(V) =< to_number(get_tmpl_value(Word, Dict));
         [Word, "in" | Ws] -> lists:member(get_tmpl_value(Word, Dict), Ws);
         [Word, "not-in" | Ws] -> not lists:member(get_tmpl_value(Word, Dict), Ws)
     end,

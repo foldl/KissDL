@@ -56,20 +56,35 @@ start(Fn, Path, RptPid) ->
     end,
     spawn(F).
 
+ga_sup_remove_worker(ID, PidDict, RptPid) ->
+    PidDict10 = dict:erase(ID, PidDict),
+    case dict:size(PidDict10) of
+        0 ->
+            error_logger:info_report("All workers exit."),
+            case get(best_result) of
+                {ID, _Size} -> notify(RptPid, {best, ?MODULE, ID});
+                _ -> notify(RptPid, {fail, ?MODULE})
+            end;
+        _ -> ga_supervisor(PidDict10, RptPid)
+    end.
+
 ga_supervisor(PidDict, RptPid) ->
     receive
         {done, ID} ->
             dict:fold(fun (_ID0, {Pid, _V}, _Acc) -> Pid ! kill end, 0, PidDict),
             error_logger:info_report("Job done."),
             notify(RptPid, {done, ?MODULE, ID});
-        {quit, ID} ->
-            PidDict10 = dict:erase(ID, PidDict),
-            case dict:size(PidDict10) of
-                0 ->
-                    error_logger:info_report("All workers exit."),
-                    notify(RptPid, {fail, ?MODULE});
-                _ -> ga_supervisor(PidDict10, RptPid)
-            end;
+        {quit, ID, LastSize} ->
+            case get(best_result) of
+                {_ID0, Size0} when Size0 > LastSize ->
+                    put(best_result, {ID, LastSize});
+                _ ->
+                    put(best_result, {ID, LastSize})
+            end,
+            ga_sup_remove_worker(ID, PidDict, RptPid);
+        {Other, ID} ->
+            error_logger:error_msg("unknown message: ~p~n", [Other]),
+            ga_sup_remove_worker(ID, PidDict, RptPid);
         Msg ->
             error_logger:error_msg("unknown message: ~p~n", [Msg]),
             ga_supervisor(PidDict, RptPid)
@@ -378,7 +393,7 @@ seg_has_overlap(X, [_H | T]) ->
              totalGen = 0,
 
              maxTotal = 100000,
-             maxNoChange = 2000,
+             maxNoChange = 3000,
              popuSize
          }).
 
@@ -416,31 +431,33 @@ ga_loop(#ga_state{popu = [{Size, _Candi} | _T] = Population, path = Path} = Stat
                                          State#ga_state.varGroup,
                                          erlang:max(round(SizeFactor * State#ga_state.popuSize), 1)}),
     case ga_pp(State#ga_state{popu = NewPopulation}) of
-        X when is_atom(X) -> State#ga_state.supervisor ! {X, State#ga_state.id};
+        {quit, LastSize} -> State#ga_state.supervisor ! {quit, State#ga_state.id, LastSize};
+        done -> State#ga_state.supervisor ! {done, State#ga_state.id};
+        error -> State#ga_state.supervisor ! {error, State#ga_state.id};
         NewState -> ga_loop(NewState)
     end.
 
 ga_pp(#ga_state{popu = Population = [{Size, _Candi} | _T], sizeInf = SizeInf, path = Path} = State) when Size < SizeInf ->
     error_logger:error_msg("Worker[~p] error: internal error!", [State#ga_state.id]),
     save_population(Path, State#ga_state.id, Population, "error"),
-    done;
+    error;
 ga_pp(#ga_state{popu = Population = [{Size, _Candi} | _T], sizeInf = SizeInf, path = Path} = State) when Size == SizeInf ->
     error_logger:info_msg("Worker[~p] done: Inf reached!", [State#ga_state.id]),
-    save_population(Path, State#ga_state.id, Population, "done"),
+    save_population(Path, State#ga_state.id, Population, "save"),
     done;
 ga_pp(#ga_state{popu = [{Size, _Candi} | _T], lastSize = LastSize, totalGen = Total} = State) when Size < LastSize ->
     State#ga_state{lastSize = Size, sizeCounter = 0, totalGen = Total + 1};
 ga_pp(#ga_state{popu = [{Size, _Candi} | _T], lastSize = LastSize, totalGen = Total} = State) when Size < LastSize ->
     State#ga_state{lastSize = Size, sizeCounter = 0, totalGen = Total + 1};
-ga_pp(#ga_state{popu = Population, totalGen = Total, maxTotal = Max, path = Path} = State) when Total > Max ->
+ga_pp(#ga_state{popu = Population, lastSize = LastSize, totalGen = Total, maxTotal = Max, path = Path} = State) when Total > Max ->
     error_logger:error_msg("Worker[~p] failed: maximum generation reached!~n", [State#ga_state.id]),
-    save_population(Path, State#ga_state.id, Population, "failed"),
-    quit;
+    save_population(Path, State#ga_state.id, Population, "save"),
+    {quit, LastSize};
 ga_pp(#ga_state{popu = Population, lastSize = LastSize,
                 sizeCounter = Counter, maxNoChange = Max, path = Path} = State) when Counter > Max ->
     error_logger:error_msg("Worker[~p] aborted: size couldn't be further minimized: ~p!~n", [State#ga_state.id, LastSize]),
-    save_population(Path, State#ga_state.id, Population, "abort"),
-    quit;
+    save_population(Path, State#ga_state.id, Population, "save"),
+    {quit, LastSize};
 ga_pp(#ga_state{sizeCounter = Counter, totalGen = Total} = State) ->
     State#ga_state{totalGen = Total + 1, sizeCounter = Counter + 1}.
 
@@ -464,11 +481,11 @@ save_population(Path, ID, Population, Type) ->
 
 unconsult_prog(Path, {Inputs, Outputs, #prog{aliasSets = AliasSets, aliasDict = AliasDict} = _Prog}) ->
     {ok, Fid} = file:open(filename:join([Path, "prog"]), [write]),
-    io:format(Fid, "%%============== Alias ===========%%~n", []),
-    lists:map(fun (Set) ->
+    AliasL = lists:map(fun (Set) ->
         [AItem | _] = Alias = sets:to_list(Set),
-        io:format(Fid, "{~p, ~p}.~n", [Alias, dict:fetch(AItem, AliasDict)])
+        {dict:fetch(AItem, AliasDict), Alias}
     end, AliasSets),
+    io:format(Fid, "%%============== Alias ===========%%~n~p.~n", [AliasL]),
     io:format(Fid, "%%============== In ===========%%~n~p.~n", [Inputs]),
     io:format(Fid, "%%============== Out ===========%%~n~p.~n", [Outputs]),
     file:close(Fid).
